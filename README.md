@@ -332,7 +332,7 @@ O projeto inclui uma collection completa do Postman para facilitar os testes.
 
 1. Abra o Postman
 2. Clique em **Import**
-3. Selecione o arquivo `API-Usuarios-c#.postman_collection.json`
+3. Selecione o arquivo `API-Usuarios.postman_collection.json`
 4. Ajuste a variável `base_url` para a porta correta (http://localhost:5191)
 
 ### Executar Testes
@@ -409,4 +409,3 @@ No vídeo você encontrará:
 - Verificação do soft delete no banco de dados
 
 ---
-
