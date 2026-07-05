@@ -16,6 +16,12 @@ Este projeto consiste em uma API RESTful que permite o cadastro, consulta, atual
 - ✅ Validação de email único
 - ✅ Validação de idade mínima (18 anos)
 - ✅ Validação de formato de telefone brasileiro
+- ✅ Senhas armazenadas exclusivamente como hash PBKDF2 com salt aleatório
+- ✅ Respostas da API sem exposição de senha ou hash
+- ✅ Erros padronizados com Problem Details (RFC 9457)
+
+> [!IMPORTANT]
+> Esta API ainda não implementa autenticação, login, emissão de tokens ou autorização. O hash de senha protege os dados armazenados, mas não transforma os endpoints em endpoints autenticados.
 
 ## 🛠️ Tecnologias Utilizadas
 
@@ -23,7 +29,8 @@ Este projeto consiste em uma API RESTful que permite o cadastro, consulta, atual
 - **[ASP.NET Core](https://docs.microsoft.com/aspnet/core)** - Web framework com Minimal APIs
 - **[Entity Framework Core 10.0](https://docs.microsoft.com/ef/core)** - ORM para acesso a dados
 - **[SQLite](https://www.sqlite.org/)** - Banco de dados relacional
-- **[FluentValidation 11.3](https://docs.fluentvalidation.net/)** - Biblioteca de validação
+- **[FluentValidation 12.1](https://docs.fluentvalidation.net/)** - Biblioteca de validação
+- **PasswordHasher do ASP.NET Core** - Hash PBKDF2 de senhas
 - **[Swagger/OpenAPI](https://swagger.io/)** - Documentação interativa da API
 
 ## 🏗️ Arquitetura e Padrões
@@ -50,7 +57,8 @@ APIUsuarios/
 │   │   └── UsuarioDtos.cs
 │   ├── Interfaces/             # Contratos
 │   │   ├── IUsuarioRepository.cs
-│   │   └── IUsuarioService.cs
+│   │   ├── IUsuarioService.cs
+│   │   └── IPasswordService.cs
 │   ├── Services/               # Lógica de Negócio
 │   │   └── UsuarioService.cs
 │   └── Validators/             # Validações
@@ -58,16 +66,19 @@ APIUsuarios/
 │       └── UsuarioUpdateDtoValidator.cs
 │
 ├── Infrastructure/              # Camada de Infraestrutura
+│   ├── Errors/                  # Tratamento global com Problem Details
 │   ├── Persistence/
 │   │   └── AppDbContext.cs     # Configuração do EF Core
-│   └── Repositories/
-│       └── UsuarioRepository.cs # Implementação do Repository
+│   ├── Repositories/
+│   │   └── UsuarioRepository.cs # Implementação do Repository
+│   └── Security/
+│       └── PasswordService.cs   # Implementação do hash de senha
 │
 ├── Migrations/                  # Migrações do EF Core
 ├── DateTimeConverter.cs         # Conversor de formatação de data
 ├── Program.cs                   # Configuração e Endpoints
 ├── appsettings.json            # Configurações da aplicação
-└── APIUsuarios.csproj          # Arquivo do projeto
+└── APIUsuarioss.csproj         # Arquivo do projeto
 ```
 
 ## 📦 Modelo de Dados
@@ -79,7 +90,7 @@ APIUsuarios/
 | Id | int | Identificador único | PK, Auto-increment |
 | Nome | string | Nome completo | Obrigatório, 3-100 caracteres |
 | Email | string | Endereço de email | Obrigatório, formato válido, único |
-| Senha | string | Senha do usuário | Obrigatório, mínimo 6 caracteres |
+| Senha | string | Recebida somente na criação e armazenada como hash PBKDF2 | Obrigatório, mínimo 6 caracteres; nunca retornada pela API |
 | DataNascimento | DateTime | Data de nascimento | Obrigatório, idade >= 18 anos |
 | Telefone | string | Telefone (opcional) | Formato: (XX) XXXXX-XXXX |
 | Ativo | bool | Status do usuário | Padrão: true (soft delete) |
@@ -161,7 +172,7 @@ https://localhost:{5191}/swagger
 # Compilar o projeto
 dotnet build
 
-# Executar testes (se houver)
+# Executar testes
 dotnet test
 
 # Criar nova migration
@@ -173,6 +184,16 @@ dotnet ef database update NomeDaMigrationAnterior
 # Limpar build
 dotnet clean
 ```
+
+## 🔒 Segurança
+
+- O e-mail é normalizado com remoção de espaços externos e conversão para minúsculas antes de consultas e gravações.
+- O índice único `IX_Usuarios_Email` reforça a unicidade no SQLite.
+- A senha em texto puro existe apenas durante o processamento da requisição de criação; somente o hash PBKDF2 é persistido.
+- Os DTOs de leitura não possuem campos de senha, e a propriedade de hash também é protegida contra serialização acidental.
+- Erros inesperados retornam uma mensagem genérica em formato Problem Details. Detalhes técnicos são enviados apenas ao log da aplicação.
+- A API não possui autenticação/login. Não deve ser publicada como serviço aberto antes da implementação de autenticação e autorização.
+- Bancos criados por versões antigas podem conter senhas em texto puro. Como esta versão ainda não possui login, descarte esses bancos de desenvolvimento e recrie-os antes de continuar usando a aplicação.
 
 ## 📮 Exemplos de Requisições
 

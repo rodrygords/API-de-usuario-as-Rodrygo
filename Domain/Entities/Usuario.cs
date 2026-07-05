@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace APIUsuarios.Domain.Entities;
 
 public class Usuario
@@ -5,7 +7,8 @@ public class Usuario
     public int Id { get; set; }
     public string Nome { get; set; } = null!;
     public string Email { get; set; } = null!;
-    public string Senha { get; set; } = null!;
+    [JsonIgnore]
+    public string SenhaHash { get; set; } = null!;
     public DateTime DataNascimento { get; set; }
     public string? Telefone { get; set; }
     public bool Ativo { get; set; } = true;

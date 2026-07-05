@@ -33,7 +33,9 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.Email)
                 .IsUnique();
 
-            entity.Property(e => e.Senha)
+            entity.Property(e => e.SenhaHash)
+                .HasColumnName("Senha")
+                .HasMaxLength(512)
                 .IsRequired();
 
             entity.Property(e => e.DataNascimento)

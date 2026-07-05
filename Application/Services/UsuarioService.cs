@@ -1,4 +1,6 @@
+using APIUsuarios.Application.Common;
 using APIUsuarios.Application.DTOs;
+using APIUsuarios.Application.Exceptions;
 using APIUsuarios.Application.Interfaces;
 using APIUsuarios.Domain.Entities;
 
@@ -7,10 +9,14 @@ namespace APIUsuarios.Application.Services;
 public class UsuarioService : IUsuarioService
 {
     private readonly IUsuarioRepository _repository;
+    private readonly IPasswordService _passwordService;
 
-    public UsuarioService(IUsuarioRepository repository)
+    public UsuarioService(
+        IUsuarioRepository repository,
+        IPasswordService passwordService)
     {
         _repository = repository;
+        _passwordService = passwordService;
     }
 
     public async Task<IEnumerable<UsuarioReadDto>> ListarAsync(CancellationToken ct)
@@ -27,21 +33,25 @@ public class UsuarioService : IUsuarioService
 
     public async Task<UsuarioReadDto> CriarAsync(UsuarioCreateDto dto, CancellationToken ct)
     {
-        if (await _repository.EmailExistsAsync(dto.Email.ToLower(), ct))
+        var emailNormalizado = EmailNormalizer.Normalize(dto.Email);
+
+        if (await _repository.EmailExistsAsync(emailNormalizado, ct))
         {
-            throw new InvalidOperationException("Email já cadastrado");
+            throw new EmailDuplicadoException();
         }
 
         var usuario = new Usuario
         {
             Nome = dto.Nome,
-            Email = dto.Email.ToLower(),
-            Senha = dto.Senha,
+            Email = emailNormalizado,
+            SenhaHash = string.Empty,
             DataNascimento = dto.DataNascimento,
             Telefone = dto.Telefone,
             Ativo = true,
             DataCriacao = DateTime.UtcNow
         };
+
+        usuario.SenhaHash = _passwordService.Hash(usuario, dto.Senha);
 
         await _repository.AddAsync(usuario, ct);
         await _repository.SaveChangesAsync(ct);
@@ -54,23 +64,24 @@ public class UsuarioService : IUsuarioService
         var usuario = await _repository.GetByIdAsync(id, ct);
         if (usuario == null)
         {
-            throw new KeyNotFoundException("Usuário não encontrado");
+            throw new UsuarioNaoEncontradoException();
         }
 
-        var usuarioComEmail = await _repository.GetByEmailAsync(dto.Email.ToLower(), ct);
+        var emailNormalizado = EmailNormalizer.Normalize(dto.Email);
+        var usuarioComEmail = await _repository.GetByEmailAsync(emailNormalizado, ct);
         if (usuarioComEmail != null && usuarioComEmail.Id != id)
         {
-            throw new InvalidOperationException("Email já cadastrado");
+            throw new EmailDuplicadoException();
         }
 
         usuario.Nome = dto.Nome;
-        usuario.Email = dto.Email.ToLower();
+        usuario.Email = emailNormalizado;
         usuario.DataNascimento = dto.DataNascimento;
         usuario.Telefone = dto.Telefone;
         usuario.Ativo = dto.Ativo;
         usuario.DataAtualizacao = DateTime.UtcNow;
 
-        await _repository.UpdateAsync(usuario, ct);
+        _repository.Update(usuario);
         await _repository.SaveChangesAsync(ct);
 
         return MapToReadDto(usuario);
@@ -87,15 +98,10 @@ public class UsuarioService : IUsuarioService
         usuario.Ativo = false;
         usuario.DataAtualizacao = DateTime.UtcNow;
 
-        await _repository.UpdateAsync(usuario, ct);
+        _repository.Update(usuario);
         await _repository.SaveChangesAsync(ct);
 
         return true;
-    }
-
-    public async Task<bool> EmailJaCadastradoAsync(string email, CancellationToken ct)
-    {
-        return await _repository.EmailExistsAsync(email.ToLower(), ct);
     }
 
     private static UsuarioReadDto MapToReadDto(Usuario usuario)

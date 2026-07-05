@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using FluentValidation;
 using APIUsuarios.Infrastructure.Persistence;
@@ -7,37 +8,41 @@ using APIUsuarios.Application.Services;
 using APIUsuarios.Application.Validators;
 using APIUsuarios.Application.DTOs;
 using APIUsuarios.Application.Converters;
+using APIUsuarios.Domain.Entities;
+using APIUsuarios.Infrastructure.Errors;
+using APIUsuarios.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configurar banco de dados SQLite
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Configurar Dependency Injection
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
 builder.Services.AddScoped<IUsuarioService, UsuarioService>();
+builder.Services.AddScoped<IPasswordHasher<Usuario>, PasswordHasher<Usuario>>();
+builder.Services.AddScoped<IPasswordService, PasswordService>();
 
-// Configurar FluentValidation
 builder.Services.AddValidatorsFromAssemblyContaining<UsuarioCreateDtoValidator>();
 
-// Configurar Swagger
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    options.SerializerOptions.DefaultIgnoreCondition = 
+    options.SerializerOptions.DefaultIgnoreCondition =
         System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
-    
-    // Formatar DateTime
+
     options.SerializerOptions.Converters.Add(new DateTimeConverter());
     options.SerializerOptions.Converters.Add(new NullableDateTimeConverter());
 });
 
 var app = builder.Build();
 
-// Configurar pipeline HTTP
+app.UseExceptionHandler();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -46,75 +51,39 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// ============================================
-// ENDPOINTS
-// ============================================
-
-// GET /usuarios - Listar todos os usuários
 app.MapGet("/usuarios", async (IUsuarioService service, CancellationToken ct) =>
 {
-    try
-    {
-        var usuarios = await service.ListarAsync(ct);
-        return Results.Ok(usuarios);
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 500);
-    }
+    var usuarios = await service.ListarAsync(ct);
+    return Results.Ok(usuarios);
 })
 .WithName("ListarUsuarios");
 
-// GET /usuarios/{id} - Buscar usuário por ID
 app.MapGet("/usuarios/{id:int}", async (int id, IUsuarioService service, CancellationToken ct) =>
 {
-    try
-    {
-        var usuario = await service.ObterAsync(id, ct);
-        return usuario != null ? Results.Ok(usuario) : Results.NotFound(new { message = "Usuário não encontrado" });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 500);
-    }
+    var usuario = await service.ObterAsync(id, ct);
+    return usuario != null
+        ? Results.Ok(usuario)
+        : UsuarioNotFoundProblem();
 })
 .WithName("ObterUsuario");
 
-// POST /usuarios - Criar novo usuário
 app.MapPost("/usuarios", async (
     UsuarioCreateDto dto,
     IUsuarioService service,
     IValidator<UsuarioCreateDto> validator,
     CancellationToken ct) =>
 {
-    try
+    var validationResult = await validator.ValidateAsync(dto, ct);
+    if (!validationResult.IsValid)
     {
-        // Validar DTO
-        var validationResult = await validator.ValidateAsync(dto, ct);
-        if (!validationResult.IsValid)
-        {
-            return Results.BadRequest(new
-            {
-                message = "Validação falhou",
-                errors = validationResult.Errors.Select(e => new { field = e.PropertyName, message = e.ErrorMessage })
-            });
-        }
+        return Results.ValidationProblem(ToValidationErrors(validationResult));
+    }
 
-        var usuario = await service.CriarAsync(dto, ct);
-        return Results.Created($"/usuarios/{usuario.Id}", usuario);
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.Conflict(new { message = ex.Message });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 500);
-    }
+    var usuario = await service.CriarAsync(dto, ct);
+    return Results.Created($"/usuarios/{usuario.Id}", usuario);
 })
 .WithName("CriarUsuario");
 
-// PUT /usuarios/{id} - Atualizar usuário
 app.MapPut("/usuarios/{id:int}", async (
     int id,
     UsuarioUpdateDto dto,
@@ -122,50 +91,37 @@ app.MapPut("/usuarios/{id:int}", async (
     IValidator<UsuarioUpdateDto> validator,
     CancellationToken ct) =>
 {
-    try
+    var validationResult = await validator.ValidateAsync(dto, ct);
+    if (!validationResult.IsValid)
     {
-        // Validar DTO
-        var validationResult = await validator.ValidateAsync(dto, ct);
-        if (!validationResult.IsValid)
-        {
-            return Results.BadRequest(new
-            {
-                message = "Validação falhou",
-                errors = validationResult.Errors.Select(e => new { field = e.PropertyName, message = e.ErrorMessage })
-            });
-        }
+        return Results.ValidationProblem(ToValidationErrors(validationResult));
+    }
 
-        var usuario = await service.AtualizarAsync(id, dto, ct);
-        return Results.Ok(usuario);
-    }
-    catch (KeyNotFoundException ex)
-    {
-        return Results.NotFound(new { message = ex.Message });
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.Conflict(new { message = ex.Message });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 500);
-    }
+    var usuario = await service.AtualizarAsync(id, dto, ct);
+    return Results.Ok(usuario);
 })
 .WithName("AtualizarUsuario");
 
-// DELETE /usuarios/{id} - Remover usuário (soft delete)
 app.MapDelete("/usuarios/{id:int}", async (int id, IUsuarioService service, CancellationToken ct) =>
 {
-    try
-    {
-        var removido = await service.RemoverAsync(id, ct);
-        return removido ? Results.NoContent() : Results.NotFound(new { message = "Usuário não encontrado" });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 500);
-    }
+    var removido = await service.RemoverAsync(id, ct);
+    return removido
+        ? Results.NoContent()
+        : UsuarioNotFoundProblem();
 })
 .WithName("RemoverUsuario");
 
 app.Run();
+
+static Dictionary<string, string[]> ToValidationErrors(FluentValidation.Results.ValidationResult result) =>
+    result.Errors
+        .GroupBy(error => error.PropertyName)
+        .ToDictionary(
+            group => group.Key,
+            group => group.Select(error => error.ErrorMessage).ToArray());
+
+static IResult UsuarioNotFoundProblem() =>
+    Results.Problem(
+        statusCode: StatusCodes.Status404NotFound,
+        title: "Recurso não encontrado",
+        detail: "Usuário não encontrado");

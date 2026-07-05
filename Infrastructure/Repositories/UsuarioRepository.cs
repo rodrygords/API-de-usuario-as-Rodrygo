@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
+using APIUsuarios.Application.Common;
+using APIUsuarios.Application.Exceptions;
 using APIUsuarios.Application.Interfaces;
 using APIUsuarios.Domain.Entities;
 using APIUsuarios.Infrastructure.Persistence;
@@ -25,13 +28,15 @@ public class UsuarioRepository : IUsuarioRepository
     public async Task<Usuario?> GetByIdAsync(int id, CancellationToken ct)
     {
         return await _context.Usuarios
-            .FirstOrDefaultAsync(u => u.Id == id, ct);
+            .FirstOrDefaultAsync(u => u.Id == id && u.Ativo, ct);
     }
 
     public async Task<Usuario?> GetByEmailAsync(string email, CancellationToken ct)
     {
+        var emailNormalizado = EmailNormalizer.Normalize(email);
+
         return await _context.Usuarios
-            .FirstOrDefaultAsync(u => u.Email == email.ToLower(), ct);
+            .FirstOrDefaultAsync(u => u.Email == emailNormalizado, ct);
     }
 
     public async Task AddAsync(Usuario usuario, CancellationToken ct)
@@ -39,26 +44,30 @@ public class UsuarioRepository : IUsuarioRepository
         await _context.Usuarios.AddAsync(usuario, ct);
     }
 
-    public Task UpdateAsync(Usuario usuario, CancellationToken ct)
+    public void Update(Usuario usuario)
     {
         _context.Usuarios.Update(usuario);
-        return Task.CompletedTask;
-    }
-
-    public Task RemoveAsync(Usuario usuario, CancellationToken ct)
-    {
-        _context.Usuarios.Update(usuario);
-        return Task.CompletedTask;
     }
 
     public async Task<bool> EmailExistsAsync(string email, CancellationToken ct)
     {
+        var emailNormalizado = EmailNormalizer.Normalize(email);
+
         return await _context.Usuarios
-            .AnyAsync(u => u.Email == email.ToLower(), ct);
+            .AnyAsync(u => u.Email == emailNormalizado, ct);
     }
 
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
-        return await _context.SaveChangesAsync(ct);
+        try
+        {
+            return await _context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException is SqliteException { SqliteErrorCode: 19 } sqliteException &&
+            sqliteException.Message.Contains("Usuarios.Email", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new EmailDuplicadoException(ex);
+        }
     }
 }
